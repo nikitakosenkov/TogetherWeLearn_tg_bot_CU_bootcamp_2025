@@ -40,14 +40,14 @@ def first_kb():
 
 def second_kb():
     kb_list = [
-        [KeyboardButton(text="РАС"), KeyboardButton(text="Дислексия (в разработке)"), KeyboardButton(text="Проблемы со слухом (в разработке)")],
+        [KeyboardButton(text="РАС (Расстройство аутистического спектра)")], [KeyboardButton(text="ЗПР (Задержка психического развития)")],[KeyboardButton(text="Синдром Дауна")],
     ]
     keyboard = ReplyKeyboardMarkup(keyboard=kb_list, resize_keyboard=True, one_time_keyboard=True)
     return keyboard
 
 def third_kb():
     kb_list = [
-        [KeyboardButton(text="Составить тест по теме"), KeyboardButton(text="Облегчить понимание материала для ученика"), KeyboardButton(text="Изменить данные ученика")],
+        [KeyboardButton(text="Составить тест по теме")], [KeyboardButton(text="Облегчить понимание материала для ученика")], [KeyboardButton(text="Изменить данные ученика")],
     ]
     keyboard = ReplyKeyboardMarkup(keyboard=kb_list, resize_keyboard=True, one_time_keyboard=True)
     return keyboard
@@ -89,25 +89,37 @@ async def user_name(message: Message, state: FSMContext) -> None:
 
 async def clas(message: Message, state: FSMContext) -> None:
     data = await state.update_data(clas=message.text)
-    await state.set_state(UserInfo.disability)
-    await message.answer("Отлично! Теперь выберите проблему вашего ученика:", reply_markup=second_kb())
+    if data['clas'] not in ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11']:
+        await state.set_state(UserInfo.clas)
+        await message.answer("Пожалуйста, выберите класс ученика из списка:", reply_markup=first_kb())
+    else:
+        await state.set_state(UserInfo.disability)
+        await message.answer("Отлично! Теперь выберите проблему вашего ученика:", reply_markup=second_kb())
 
 async def disability(message: Message, state: FSMContext) -> None:
     data = await state.update_data(disability=message.text)
-    await state.set_state(UserInfo.type)
-    await message.answer("Понятно, мы постараемся Вам помочь! Выберите тип задачи:", reply_markup=third_kb())
+    if data['disability'] not in ['РАС (Расстройство аутистического спектра)', 'ЗПР (Задержка психического развития)', 'Синдром Дауна']:
+        await state.set_state(UserInfo.disability)
+        await message.answer("Пожалуйста, выберите проблему ученика из списка:", reply_markup=second_kb())
+    else:
+        await state.set_state(UserInfo.type)
+        await message.answer("Понятно, мы постараемся Вам помочь! Выберите тип задачи:", reply_markup=third_kb())
 
 async def task(message: Message, state: FSMContext) -> None:
     data = await state.update_data(type=message.text)
-    if data['type'] == 'Составить тест по теме':
-        await state.set_state(UserInfo.predmet)
-        await message.answer("Хорошо! По какому предмету нужно составить тест?", reply_markup=fourth_kb())
-    elif data['type'] == 'Упростить материал для ученика':
-        await state.set_state(UserInfo.material)
-        await message.answer("Хорошо! Отправьте текст, который Вы хотели бы сделать более понятным для ученика:")
+    if data['type'] not in ['Составить тест по теме', 'Облегчить понимание материала для ученика', 'Изменить данные ученика']:
+        await state.set_state(UserInfo.type)
+        await message.answer("Пожалуйста, выберите тип задачи из списка:", reply_markup=third_kb())
     else:
-        await state.set_state(UserInfo.user_name)
-        await message.answer("Хорошо! Пожалуйста, напишите имя ученика:")
+        if data['type'] == 'Составить тест по теме':
+            await state.set_state(UserInfo.predmet)
+            await message.answer("Хорошо! По какому предмету нужно составить тест?", reply_markup=fourth_kb())
+        elif data['type'] == 'Облегчить понимание материала для ученика':
+            await state.set_state(UserInfo.material)
+            await message.answer("Хорошо! Отправьте текст, который Вы хотели бы сделать более понятным для ученика:")
+        else:
+            await state.set_state(UserInfo.user_name)
+            await message.answer("Хорошо! Пожалуйста, напишите имя ученика:")
 
 async def tema(message: Message, state: FSMContext) -> None:
     data = await state.update_data(predmet=message.text)
@@ -123,7 +135,8 @@ async def cnt(message: Message, state: FSMContext) -> None:
 async def test(message: Message, state: FSMContext) -> None:
     await message.answer("Подождите несколько секунд...")
     dataa = await state.update_data(cnt=message.text)
-    user_prompt = f"Сделай тест по предмету: {dataa['predmet']}, по теме: {dataa['tema']}, для ученика из {dataa['clas']} класса, с количеством вопросов: {dataa['cnt']}, обязательно учитывая заболевание ученика: Аутизм. Отправь только тему теста и сам тест"
+    user_prompt = f"Сделай тест по предмету: {dataa['predmet']}, по теме: {dataa['tema']}, для ученика из {dataa['clas']} класса, с количеством вопросов: {dataa['cnt']}, обязательно учитывая заболевание ученика: {dataa['disability']}. Отправь только тему теста и сам тест"
+    print(user_prompt)
     body = {
         'modelUri': f'gpt://{folder_id}/{gpt_model}',
         'completionOptions': {'stream': False, 'temperature': 0.3, 'maxTokens': 2000},
