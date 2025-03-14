@@ -135,7 +135,7 @@ async def cnt(message: Message, state: FSMContext) -> None:
 async def test(message: Message, state: FSMContext) -> None:
     await message.answer("Подождите несколько секунд...")
     dataa = await state.update_data(cnt=message.text)
-    user_prompt = f"Сделай тест по предмету: {dataa['predmet']}, по теме: {dataa['tema']}, для ученика из {dataa['clas']} класса, с количеством вопросов: {dataa['cnt']}, обязательно учитывая заболевание ученика: {dataa['disability']}. Отправь только тему теста и сам тест"
+    user_prompt = f"Сделай тест по предмету: {dataa['predmet']}, по теме: {dataa['tema']}, для ученика из {dataa['clas']} класса, с количеством вопросов: {dataa['cnt']}, обязательно учитывая заболевание ученика: {dataa['disability']}. Отправь только тему теста, сам тест и правильные ответы на вопросы"
     print(user_prompt)
     body = {
         'modelUri': f'gpt://{folder_id}/{gpt_model}',
