@@ -11,6 +11,8 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message, FSInputFile, BufferedInputFile
 from dotenv import load_dotenv
+from openai import OpenAI
+from gigachat import GigaChat
 
 from aiogram.types import ReplyKeyboardRemove, \
     ReplyKeyboardMarkup, KeyboardButton, \
@@ -61,6 +63,13 @@ def fourth_kb():
     keyboard = ReplyKeyboardMarkup(keyboard=kb_list, resize_keyboard=True, one_time_keyboard=True)
     return keyboard
 
+def fifth_kb():
+    kb_list = [
+        [KeyboardButton(text="В формате сказки")], [KeyboardButton(text="Облегчить понимание материала")]
+    ]
+    keyboard = ReplyKeyboardMarkup(keyboard=kb_list, resize_keyboard=True, one_time_keyboard=True)
+    return keyboard
+
 
 
 load_dotenv()
@@ -77,6 +86,7 @@ class UserInfo(StatesGroup):
     material = State()
     tema = State()
     cnt = State()
+    type_text = State()
 
 async def start(message: Message, state: FSMContext) -> None:
     await state.set_state(UserInfo.user_name)
@@ -115,98 +125,185 @@ async def task(message: Message, state: FSMContext) -> None:
             await state.set_state(UserInfo.predmet)
             await message.answer("Хорошо! По какому предмету нужно составить тест?", reply_markup=fourth_kb())
         elif data['type'] == 'Облегчить понимание материала для ученика':
-            await state.set_state(UserInfo.material)
-            await message.answer("Хорошо! Отправьте текст, который Вы хотели бы сделать более понятным для ученика:")
+            await state.set_state(UserInfo.type_text)
+            await message.answer("Хорошо! Как Вы хотели бы оформить материал?", reply_markup=fifth_kb())
         else:
             await state.set_state(UserInfo.user_name)
             await message.answer("Хорошо! Пожалуйста, напишите имя ученика:")
 
+async def txt(message: Message, state: FSMContext) -> None:
+    data = await state.update_data(type_text=message.text)
+    if data['type_text'] not in ['В формате сказки', 'Упрощение материала']:
+        await state.set_state(UserInfo.type_text)
+        await message.answer("Пожалуйста, выберите вариант из списка:", reply_markup=first_kb())
+    else:
+        await state.set_state(UserInfo.material)
+        await message.answer("Хорошо! Отправьте текст, который Вы хотели бы сделать более понятным для ученика:")
+
 async def tema(message: Message, state: FSMContext) -> None:
     data = await state.update_data(predmet=message.text)
-    await state.set_state(UserInfo.tema)
-    await message.answer("Принято! По какой теме нужно сделать тест?")
+    if data['predmet'] not in ['Химия', 'Математика', 'Русский язык', 'Биология', 'Информатика', 'Физика', 'Обществознание', 'География', 'История']:
+        await state.set_state(UserInfo.predmet)
+        await message.answer("Пожалуйста, выберите предмет из списка:", reply_markup=fourth_kb())
+    else:
+        await state.set_state(UserInfo.tema)
+        await message.answer("Принято! По какой теме нужно сделать тест?")
+
+async def type_text(message: Message, state: FSMContext) -> None:
+    data = await state.update_data(tema=message.text)
+    await state.set_state(UserInfo.material)
+    await message.answer("Хорошо, сколько вопросов должно быть в тесте? (число от 1 до 20)")
 
 async def cnt(message: Message, state: FSMContext) -> None:
     data = await state.update_data(tema=message.text)
     await state.set_state(UserInfo.cnt)
-    await message.answer("Хорошо, сколько вопросов должно быть в тесте?")
+    await message.answer("Хорошо, сколько вопросов должно быть в тесте? (число от 1 до 20)")
 
 
 async def test(message: Message, state: FSMContext) -> None:
-    await message.answer("Подождите несколько секунд...")
     dataa = await state.update_data(cnt=message.text)
-    user_prompt = f"Сделай тест по предмету: {dataa['predmet']}, по теме: {dataa['tema']}, для ученика из {dataa['clas']} класса, с количеством вопросов: {dataa['cnt']}, обязательно учитывая заболевание ученика: {dataa['disability']}. Отправь только тему теста, сам тест и правильные ответы на вопросы"
-    print(user_prompt)
-    body = {
-        'modelUri': f'gpt://{folder_id}/{gpt_model}',
-        'completionOptions': {'stream': False, 'temperature': 0.3, 'maxTokens': 2000},
-        'messages': [
-            {'role': 'user', 'text': user_prompt},
-        ],
-    }
-    url = 'https://llm.api.cloud.yandex.net/foundationModels/v1/completionAsync'
-    headers = {
-        'Content-Type': 'application/json',
-        'Authorization': f'Api-Key {api_key}'
-    }
+    if not dataa['cnt'].isdigit() or int(dataa['cnt']) < 1 or int(dataa['cnt']) > 20:
+        await state.set_state(UserInfo.cnt)
+        await message.answer("Пожалуйста, напишите количество вопросов (число от 1 до 20):")
+    else:
+        await message.answer("Подождите несколько секунд...")
 
-    response = requests.post(url, headers=headers, json=body)
+        user_prompt = f"Пришли без форматирования текста. Сделай тест по предмету: {dataa['predmet']}, по теме: {dataa['tema']}, для ученика из {dataa['clas']} класса, с количеством вопросов: {dataa['cnt']}, обязательно учитывая заболевание ученика: {dataa['disability']}."
+        print(user_prompt)
+        client = OpenAI(
+            base_url="https://integrate.api.nvidia.com/v1",
+            api_key=os.getenv("LLAMA_KEY")
+        )
+        try:
+            completion = client.chat.completions.create(
+                model="meta/llama-3.3-70b-instruct",
+                messages=[{"role": "user", "content": user_prompt}],
+                temperature=0.8,
+                top_p=0.7,
+                max_tokens=8000,
+                stream=True
+            )
+            ans = ''
+            print(completion)
+            for chunk in completion:
+                if chunk.choices[0].delta.content is not None:
+                    ans += chunk.choices[0].delta.content
+                    print(chunk.choices[0].delta.content, end="")
+            print(ans)
+            for i in range(0, len(ans), 4000):
+                await message.answer(ans[i:i + 4000])
+            await state.set_state(UserInfo.type)
+            await message.answer("Готово! С чем еще мы можем помочь?", reply_markup=third_kb())
+        except Exception as e:
+            print(e)
+            await message.answer("Что-то пошло не так, попробуйте ещё раз")
+            await state.set_state(UserInfo.type)
+            await message.answer("Выберите тип задачи:", reply_markup=third_kb())
+        # body = {
+        #     'modelUri': f'gpt://{folder_id}/{gpt_model}',
+        #     'completionOptions': {'stream': False, 'temperature': 0.6, 'maxTokens': 2000},
+        #     'messages': [
+        #         {'role': 'user', 'text': user_prompt},
+        #     ],
+        # }
+        # url = 'https://llm.api.cloud.yandex.net/foundationModels/v1/completionAsync'
+        # headers = {
+        #     'Content-Type': 'application/json',
+        #     'Authorization': f'Api-Key {api_key}'
+        # }
+        #
+        # response = requests.post(url, headers=headers, json=body)
+        # print(response.json())
+        #
+        # operation_id = response.json().get('id')
+        #
+        # url = f"https://llm.api.cloud.yandex.net:443/operations/{operation_id}"
+        # headers = {"Authorization": f"Api-Key {api_key}"}
+        #
+        # while True:
+        #     response = requests.get(url, headers=headers)
+        #     done = response.json()["done"]
+        #     if done:
+        #         break
+        #     time.sleep(2)
+        # data = response.json()
+        # final_text = data['response']['alternatives'][0]['message']['text']
+        # print(final_text)
+        # await message.answer(final_text)
 
-    operation_id = response.json().get('id')
-
-    url = f"https://llm.api.cloud.yandex.net:443/operations/{operation_id}"
-    headers = {"Authorization": f"Api-Key {api_key}"}
-
-    while True:
-        response = requests.get(url, headers=headers)
-        done = response.json()["done"]
-        if done:
-            break
-        time.sleep(2)
-
-    data = response.json()
-    final_text = data['response']['alternatives'][0]['message']['text']
-    print(data['response'])
-    await message.answer(final_text.replace('*', ''))
-    await state.set_state(UserInfo.type)
-    await message.answer("Готово! С чем еще мы можем помочь?", reply_markup=third_kb())
 
 async def text(message: Message, state: FSMContext) -> None:
-    await message.answer("Подождите несколько секунд...")
     dataa = await state.update_data(material=message.text)
-    user_prompt = f"Переделай данный текст так, чтобы он стал наиболее понятен ученику с Аутизмом:\n{dataa['material']}"
-    body = {
-        'modelUri': f'gpt://{folder_id}/{gpt_model}',
-        'completionOptions': {'stream': False, 'temperature': 0.3, 'maxTokens': 2000},
-        'messages': [
-            {'role': 'user', 'text': user_prompt},
-        ],
-    }
-    url = 'https://llm.api.cloud.yandex.net/foundationModels/v1/completionAsync'
-    headers = {
-        'Content-Type': 'application/json',
-        'Authorization': f'Api-Key {api_key}'
-    }
+    if len(dataa['material']) > 10000:
+        await state.set_state(UserInfo.material)
+        await message.answer("Текст слишком большой, попробуйте другой:")
+    else:
+        await message.answer("Подождите несколько секунд...")
+        if dataa['type_text'] == 'В формате сказки':
+            user_prompt = f'Пришли без форматирования текста. Ты — опытный школьный учитель, который должен адаптировать тему для ученика с особыми образовательными потребностями ({dataa["disability"]}). Твоя задача — представить тему в виде увлекательной, понятной сказки, где главными героями будут Лунтик и его друзья. Используй простые примеры и яркие образы, чтобы облегчить понимание материала. ТЕКСТ: {dataa["material"]}'
+        else:
+            user_prompt = f"Пришли без форматирования текста. Веди себя как школьный учитель и детский психолог одновременно. Переделай данный текст так, чтобы он стал наиболее понятен ученику с заболеванием {dataa['disability']}. ТЕКСТ:\n{dataa['material']}"
+        print(user_prompt)
+        client = OpenAI(
+            base_url="https://integrate.api.nvidia.com/v1",
+            api_key=os.getenv("LLAMA_KEY")
+        )
+        try:
+            completion = client.chat.completions.create(
+                model="meta/llama-3.3-70b-instruct",
+                messages=[{"role": "user", "content": user_prompt}],
+                temperature=0.8,
+                top_p=0.7,
+                max_tokens=8000,
+                stream=True
+            )
+            ans = ''
+            print(completion)
+            for chunk in completion:
+                if chunk.choices[0].delta.content is not None:
+                    ans += chunk.choices[0].delta.content
+                    print(chunk.choices[0].delta.content, end="")
+            print(ans)
+            for i in range(0, len(ans), 4000):
+                await message.answer(ans[i:i + 4000])
 
-    response = requests.post(url, headers=headers, json=body)
+            await message.answer("Создается картинка по материалу, немного подождите...")
+            seed = int(round(datetime.now().timestamp()))
+            prompt = f"Создай картинку в стиле детский мультфильм по описанию: {ans}"[:500]
+            body = {
+                "modelUri": f"art://{folder_id}/yandex-art/latest",
+                "generationOptions": {"seed": seed, "temperature": 0.9},
+                "messages": [
+                    {"weight": 1, "text": prompt},
+                ],
+            }
+            url = "https://llm.api.cloud.yandex.net/foundationModels/v1/imageGenerationAsync"
+            headers = {"Authorization": f"Api-Key {api_key}"}
 
-    operation_id = response.json().get('id')
+            response = requests.post(url, headers=headers, json=body)
+            print(response.json())
+            operation_id = response.json()["id"]
 
-    url = f"https://llm.api.cloud.yandex.net:443/operations/{operation_id}"
-    headers = {"Authorization": f"Api-Key {api_key}"}
+            url = f"https://llm.api.cloud.yandex.net:443/operations/{operation_id}"
+            headers = {"Authorization": f"Api-Key {api_key}"}
 
-    while True:
-        response = requests.get(url, headers=headers)
-        done = response.json()["done"]
-        if done:
-            break
-        time.sleep(2)
+            while True:
+                response = requests.get(url, headers=headers)
+                done = response.json()["done"]
+                if done:
+                    break
+                time.sleep(2)
 
-    data = response.json()
-    final_text = data['response']['alternatives'][0]['message']['text']
-    await message.answer(final_text.replace('*', ''))
-    await state.set_state(UserInfo.type)
-    await message.answer("Готово! С чем еще мы можем помочь?", reply_markup=third_kb())
+            image_data = response.json()["response"]["image"]
+            image_bytes = b64decode(image_data)
+            await bot.send_photo(message.chat.id, photo=BufferedInputFile(image_bytes, filename="file.txt"))
+            await state.set_state(UserInfo.type)
+            await message.answer("Готово! С чем еще мы можем помочь?", reply_markup=third_kb())
+        except Exception as e:
+            print(e)
+            await message.answer("Что-то пошло не так, попробуйте ещё раз")
+            await state.set_state(UserInfo.type)
+            await message.answer("Выберите тип задачи:", reply_markup=third_kb())
 
 
 
@@ -221,6 +318,7 @@ async def main() -> None:
     dp.message.register(tema, UserInfo.predmet)
     dp.message.register(cnt, UserInfo.tema)
     dp.message.register(test, UserInfo.cnt)
+    dp.message.register(txt, UserInfo.type_text)
     dp.message.register(text, UserInfo.material)
 
 
